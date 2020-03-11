@@ -125,7 +125,12 @@ class AuthHandler(BaseHandler):
 
     @defer.inlineCallbacks
     def validate_user_via_ui_auth(
-        self, requester: Requester, request_body: dict, clientip: str
+        self,
+        requester: Requester,
+        request_body: dict,
+        clientip: str,
+        action_type,
+        action_id,
     ):
         """
         Checks that the user is who they claim to be, via a UI auth.
@@ -172,7 +177,9 @@ class AuthHandler(BaseHandler):
         flows = [[login_type] for login_type in self._supported_login_types]
 
         try:
-            result, params, _ = yield self.check_auth(flows, request_body, clientip)
+            result, params, _ = yield self.check_auth(
+                flows, request_body, clientip, action_type, action_id
+            )
         except LoginError:
             # Update the ratelimite to say we failed (`can_do_action` doesn't raise).
             self._failed_uia_attempts_ratelimiter.can_do_action(
@@ -210,7 +217,14 @@ class AuthHandler(BaseHandler):
         return self.checkers.keys()
 
     @defer.inlineCallbacks
-    def check_auth(self, flows: List[List[str]], clientdict: dict, clientip: str):
+    def check_auth(
+        self,
+        flows: List[List[str]],
+        clientdict: dict,
+        clientip: str,
+        action_type,
+        action_id,
+    ):
         """
         Takes a dictionary sent by the client in the login / registration
         protocol and handles the User-Interactive Auth flow.
@@ -274,6 +288,19 @@ class AuthHandler(BaseHandler):
             self._save_session(session)
         elif "clientdict" in session:
             clientdict = session["clientdict"]
+
+        # If ui_auth exists in the session this is a returning UI auth request.
+        # Validate that none of the requested information has changed.
+        if "ui_auth" not in session:
+            session["ui_auth"] = {
+                "action_type": action_type,
+                "action_id": action_id,
+            }
+        elif (
+            session["ui_auth"]["action_type"] != action_type
+            or session["ui_auth"]["action_id"] != action_id
+        ):
+            raise SynapseError(403, "Foobar")
 
         if not authdict:
             raise InteractiveAuthIncompleteError(
